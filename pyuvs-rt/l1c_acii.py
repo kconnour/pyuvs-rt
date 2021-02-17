@@ -58,6 +58,18 @@ class L1CAscii:
                 pixel_tan_altitude[integration_ind, position_ind] = tan_alt
         return pixel_tan_altitude
 
+    def make_local_time(self):
+        pixel_local_time = np.zeros((self.n_integrations, self.n_positions))
+        for counter, line in enumerate(self.__open_file()):
+            if counter < 5:
+                continue
+            if (counter - 5) % (self.n_wavelengths + 1) == 0:
+                integration_ind, position_ind = \
+                    self.__get_pixel_indices_from_info_line(line)
+                local_time = self.__get_local_time_from_info_line(line)
+                pixel_local_time[integration_ind, position_ind] = local_time
+        return pixel_local_time
+
     def make_solar_zenith_angle(self):
         sza = np.zeros((self.n_integrations, self.n_positions))
         for counter, line in enumerate(self.__open_file()):
@@ -108,7 +120,6 @@ class L1CAscii:
                 wavelength_index = (counter - 5) % (self.n_wavelengths + 1) - 1
                 reflectance[integration_ind, position_ind, wavelength_index] = rfl
 
-
     def __open_file(self):
         return open(self.file, 'r')
 
@@ -135,6 +146,10 @@ class L1CAscii:
     def __get_tangent_altitude_from_info_line(self, line) -> float:
         splits = self.__extract_numbers_from_line(line)
         return splits[12]
+
+    def __get_local_time_from_info_line(self, line) -> float:
+        splits = self.__extract_numbers_from_line(line)
+        return splits[13]
 
     def __get_solar_zenith_angle_from_info_line(self, line) -> float:
         splits = self.__extract_numbers_from_line(line)
