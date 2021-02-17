@@ -119,7 +119,8 @@ class L1CAscii:
                 rfl = self.__get_reflectance_from_line(line)
                 wavelength_index = (counter - 5) % (self.n_wavelengths + 1) - 1
                 reflectance[integration_ind, position_ind, wavelength_index] = rfl
-
+        return reflectance
+        
     def __open_file(self):
         return open(self.file, 'r')
 
