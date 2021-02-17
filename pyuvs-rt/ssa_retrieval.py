@@ -12,7 +12,6 @@ from scipy import optimize
 #import joblib
 
 # Local imports
-from pyuvs.data_contents import L1bDataContents
 import disort
 from pyRT_DISORT.controller import ComputationalParameters, ModelBehavior, \
     OutputArrays, UserLevel
@@ -33,12 +32,7 @@ from pyRT_DISORT.untested.model_atmosphere import ModelAtmosphere
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Read in external aerosol files
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# New: I moved the relevant files into the tests directory. This way I can have
-# files that change (like the atmosphere equation of state file) elsewhere
-# while keeping my tests unchanged.
-
 # Read in the atmosphere file
-#tests_path = os.path.dirname(os.path.realpath(__file__))
 aero_path = '/home/kyle/repos/pyuvs-rt/data'
 eos_file = ExternalFile(os.path.join(aero_path, 'marsatm.npy'))
 
@@ -49,48 +43,20 @@ dust_file = ExternalFile(os.path.join(aero_path, 'dust_properties.fits'))
 dust_phsfn_file = ExternalFile(os.path.join(aero_path,
                                             'dust_phase_function.fits'))
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Observation
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# TODO: This is just a test file so I can see if the code works together. Loop over files
-# TODO: Read in l1c files here too
-dc = L1bDataContents('/media/kyle/Samsung_T5/IUVS_data/orbit07200/mvn_iuv_l1b_apoapse-orbit07252-muv_20180621T090628_v13_r01.fits.gz')
-
-short_wav = dc.wavelengths[0, 0, :] / 1000   # TODO: these are centers, not edges
-long_wav = (dc.wavelengths[0, 0, :] + 5) / 1000  # TODO: this is a hack
-wavelengths = Wavelengths(short_wav, long_wav)
-low_wavenumber = wavelengths.low_wavenumber
-high_wavenumber = wavelengths.high_wavenumber
-
-sza = dc.solar_zenith_angle
-emission_angle = dc.emission_angle
-phase_angle = dc.phase_angle
-
-angles = Angles(sza, emission_angle, phase_angle)
-mu = angles.mu
-mu0 = angles.mu0
-phi = angles.phi
-phi0 = angles.phi0
+# TODO: Read in external files (curiosity OD, vertical profiles) here and
+#  interpolate such that I can get a value at any Ls
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Make the equation of state variables on a custom grid
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 z_boundaries = np.linspace(80, 0, num=20)    # Define the boundaries to use
-# New: eos_from_array is a helper function to make a ModelEquationOfState class
-# See eos.py for more info but this replaces ModelGrid (mostly I think the name
-# is better)
 model_eos = eos_from_array(eos_file.array, z_boundaries, 3.71, 7.3*10**-26)
 temperatures = model_eos.temperature_boundaries
 h_lyr = model_eos.scale_height_boundaries
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Construct aerosol/model properties
+# Construct the immutable aerosol properties
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# New: note that these will almost certainly change---either the classes
-# themselves, or I ought to make functions that do some of this work
-# Note: disort_multi ships with aerosol_dust.dat at 1.5 microns (index 10) of
-# the forward scattering file. Also note that this has 14 particle sizes, not
-# 13 like the phase function array I have
 wavs = dust_file.array['wavelengths'].data
 sizes = dust_file.array['particle_sizes'].data
 c_ext = ForwardScatteringProperty(dust_file.array['primary'].data[:, :, 0],
@@ -99,17 +65,11 @@ c_ext = ForwardScatteringProperty(dust_file.array['primary'].data[:, :, 0],
 c_sca = ForwardScatteringProperty(dust_file.array['primary'].data[:, :, 1],
                                   particle_size_grid=sizes,
                                   wavelength_grid=wavs)
+
+# TODO: this needs overwritten in the loop
 dust_properties = ForwardScatteringPropertyCollection()
 dust_properties.add_property(c_ext, 'c_extinction')
 dust_properties.add_property(c_sca, 'c_scattering')
-
-# Make a dust Conrath profile
-conrath_profile = Conrath(model_eos, 10, 0.5)
-
-# Define a smooth gradient of particle sizes. Here I'm making all particle sizes
-# = 1.5 so I can compare with disort_multi (I don't know how to include a
-# particle size gradient with it)
-p_sizes = np.linspace(1.5, 1.5, num=len(conrath_profile.profile))
 
 # Make a phase function. I'm allowing negative coefficients here
 dust_phsfn = TabularLegendreCoefficients(
@@ -117,61 +77,9 @@ dust_phsfn = TabularLegendreCoefficients(
     dust_phsfn_file.array['particle_sizes'].data,
     dust_phsfn_file.array['wavelengths'].data)
 
-# Make the new Column where wave_ref = 9.3 microns and column OD = 1
-dust_col = Column(dust_properties, model_eos, conrath_profile.profile, p_sizes,
-                  short_wav, 9.3, 1, dust_phsfn)
-
-# Make Rayleigh stuff
-n_moments = 1000
-rco2 = RayleighCo2(short_wav, model_eos, n_moments)
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Make the model
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-model = ModelAtmosphere()
-# Make tuples of (dtauc, ssalb, pmom) for each constituent
-dust_info = (dust_col.total_optical_depth, dust_col.scattering_optical_depth,
-             dust_col.scattering_optical_depth * dust_col.phase_function)
-rayleigh_info = (rco2.scattering_optical_depths, rco2.scattering_optical_depths,
-                 rco2.phase_function)  # This works since scat OD = total OD
-
-# Add dust and Rayleigh scattering to the model
-model.add_constituent(dust_info)
-model.add_constituent(rayleigh_info)
-
-# Once everything is in the model, compute the model. Then, slice off the
-# wavelength dimension since DISORT can only handle 1 wavelength at a time
-model.compute_model()
-optical_depths = model.hyperspectral_total_optical_depths[:, 1]
-ssa = model.hyperspectral_total_single_scattering_albedos[:, 1]
-polynomial_moments = model.hyperspectral_legendre_moments[:, :, 1]
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Make the size of the computational parameters
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Semi-new: this class just holds parameters DISORT wants. It's kinda useless by
-# itself but a valuable input into the upcoming classes
-n_layers = model_eos.n_layers
-n_streams = 16
-n_umu = 1
-n_phi = len(phi)
-n_user_levels = 81
-cp = ComputationalParameters(
-    n_layers, n_moments, n_streams, n_phi, n_umu, n_user_levels)
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Make misc variables
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# New: I split the old "control" classes into additional classes that I think
-# are more accurately named and grouped. I think many of these variables in
-# DISORT are horribly named. For clarity, I included the "DISORT" name as the
-# variable name, and the name I prefer as the property
-# (i.e. fisot = isotropic_flux). There's really no reason to define any of these
-# variables here---you can just put them directly into the disort call---but I
-# thought it might be helpful.
-
-# Semi-new: another note, that many of these variables take a boolean or float
-# value. I made them optional, and use default values that disort_mulit uses
 incident_flux = IncidentFlux()
 fbeam = incident_flux.beam_flux
 fisot = incident_flux.isotropic_flux
@@ -195,64 +103,143 @@ usrang = mb.user_angles
 usrtau = mb.user_optical_depths
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Make the output arrays
+# Observation
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-oa = OutputArrays(cp)
-albmed = oa.albedo_medium
-flup = oa.diffuse_up_flux
-rfldn = oa.diffuse_down_flux
-rfldir = oa.direct_beam_flux
-dfdt = oa.flux_divergence
-uu = oa.intensity
-uavg = oa.mean_intensity
-trnmed = oa.transmissivity_medium
+# TODO: This is just a test file. Select the data I want here
+files = ['/home/kyle/Downloads/mvn_iuv_l1c_apoapse-orbit07200-muv_20180611T170741_v13_r01.fits']
+for file in files:
+    hdul = fits.open(file)
+    reflectance = hdul['reflectance'].data
+    n_integrations = reflectance.shape[0]
+    n_positions = reflectance.shape[1]
+    n_wavelengths = reflectance.shape[2]
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Optical depth output structure
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# I made this into its own class to handle utau. This one singular variable is
-# an absolute nightmare and DISORT should be tweaked to get rid of it, but
-# you're not paying me to discuss the bad decisions that went into making this
-utau = UserLevel(cp, mb).optical_depth_output
+    bin_width = 2.81   # nm
+    wavelengths = hdul['wavelengths'].data
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Surface treatment
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# New: I made an abstract Surface class, and all surfaces you'd use inherit from
-# it. The idea is that surface makes arrays of 0s for rhou, rhoq, bemst, etc. In
-# the special case of a Lambertian surface, these are fine inputs to DISORT
-# since it ignores these arrays when LAMBER=True. Otherwise, these arrays get
-# populated when you call disobrdf. For instance, if you instantiate HapkeHG2,
-# it calls disobrdf in the constructor which populates the surface arrays. The
-# benefit to the user is that all classes derived from Surface will have the
-# same properties.
-lamb = Lambertian(0.5, cp)   # albedo = 0.5
-albedo = lamb.albedo
-lamber = lamb.lambertian
-rhou = lamb.rhou
-rhoq = lamb.rhoq
-bemst = lamb.bemst
-emust = lamb.emust
-rho_accurate = lamb.rho_accurate
+    short_wav = (wavelengths - bin_width) / 1000   # convert to microns
+    long_wav = (wavelengths + bin_width) / 1000
+    wavelengths = Wavelengths(short_wav, long_wav)
+    low_wavenumber = wavelengths.low_wavenumber
+    high_wavenumber = wavelengths.high_wavenumber
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Run the model
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-rfldir, rfldn, flup, dfdt, uavg, uu, albmed, trnmed = \
-    disort.disort(usrang, usrtau, ibcnd, onlyfl, prnt, plank, lamber,
-                  deltamplus, dopseudosphere, optical_depths, ssa,
-                  polynomial_moments, temperatures, low_wavenumber,
-                  high_wavenumber, utau, mu0, phi0, mu, phi, fbeam, fisot,
-                  albedo, btemp, ttemp, temis, radius, h_lyr, rhoq, rhou,
-                  rho_accurate, bemst, emust, accur, header, rfldir,
-                  rfldn, flup, dfdt, uavg, uu, albmed, trnmed)
+    sza = hdul['solar_zenith_angle'].data
+    emission_angle = hdul['emission_angle'].data
+    phase_angle = hdul['phase_angle'].data
+    
+    angles = Angles(sza, emission_angle, phase_angle)
+    mu = angles.mu
+    mu0 = angles.mu0
+    phi = angles.phi
+    phi0 = angles.phi0
 
-print(uu[0, 0, 0])   # shape: (1, 81, 1)
-# This gives          0.041567463
-# disort_multi gives  0.0415661298
-# I'm running ./disort_multi -dust_conrath 0.5, 10 -dust_phsfn 98 -NSTR 16 < testInput.txt
-# testInput.txt is: 1, 0.5, 10, 30, 50, 40, 20, 1, 0, 0
-# And dust_phsfn has 65 moments at 1.5 micron (size) and 9.3 microns(wavelength)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Make the size of the computational parameters
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    n_layers = model_eos.n_layers
+    n_streams = 16
+    n_umu = 1
+    n_phi = 1
+    n_user_levels = 81
+    n_moments = 1000
+    cp = ComputationalParameters(
+        n_layers, n_moments, n_streams, n_phi, n_umu, n_user_levels)
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Surface treatment
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    lamb = Lambertian(0.01, cp)
+    albedo = lamb.albedo
+    lamber = lamb.lambertian
+    rhou = lamb.rhou
+    rhoq = lamb.rhoq
+    bemst = lamb.bemst
+    emust = lamb.emust
+    rho_accurate = lamb.rho_accurate
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Loop over pixel
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    for integration in range(n_integrations):
+        for position in range(n_positions):
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            # Construct the mutable aerosol properties
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            # TODO: use real profile
+            conrath_profile = Conrath(model_eos, 10, 0.5)
+            # TODO: what is this really?
+            p_sizes = np.linspace(1.5, 1.5, num=len(conrath_profile.profile))
+
+            # Make the new Column where wave_ref = 9.3 microns and column OD = 1
+            # TODO: use real Curiosity OD
+            dust_col = Column(dust_properties, model_eos, conrath_profile.profile, p_sizes,
+                              short_wav[integration, position, :], 9.3, 1, dust_phsfn)
+
+            # Make Rayleigh stuff
+            rco2 = RayleighCo2(short_wav[integration, position, :], model_eos,
+                               n_moments)
+
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            # Make the model
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            model = ModelAtmosphere()
+            # Make tuples of (dtauc, ssalb, pmom) for each constituent
+            dust_info = (dust_col.total_optical_depth, dust_col.scattering_optical_depth,
+                         dust_col.scattering_optical_depth * dust_col.phase_function)
+            rayleigh_info = (rco2.scattering_optical_depths, rco2.scattering_optical_depths,
+                             rco2.phase_function)  # This works since scat OD = total OD
+
+            # Add dust and Rayleigh scattering to the model
+            model.add_constituent(dust_info)
+            model.add_constituent(rayleigh_info)
+
+            # Once everything is in the model, compute the model. Then, slice off the
+            # wavelength dimension since DISORT can only handle 1 wavelength at a time
+            model.compute_model()
+            for wavelength in range(n_wavelengths):
+                optical_depths = model.hyperspectral_total_optical_depths[:, wavelength]
+                ssa = model.hyperspectral_total_single_scattering_albedos[:, wavelength]
+                polynomial_moments = model.hyperspectral_legendre_moments[:, :, wavelength]
+
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                # Make the output arrays
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                oa = OutputArrays(cp)
+                albmed = oa.albedo_medium
+                flup = oa.diffuse_up_flux
+                rfldn = oa.diffuse_down_flux
+                rfldir = oa.direct_beam_flux
+                dfdt = oa.flux_divergence
+                uu = oa.intensity
+                uavg = oa.mean_intensity
+                trnmed = oa.transmissivity_medium
+
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                # Optical depth output structure
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                utau = UserLevel(cp, mb).optical_depth_output
+
+
+                print(disort.disort.__doc__)
+
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                # Run the model
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                rfldir, rfldn, flup, dfdt, uavg, uu, albmed, trnmed = \
+                    disort.disort(usrang, usrtau, ibcnd, onlyfl, prnt, plank, lamber,
+                                  deltamplus, dopseudosphere, optical_depths, ssa,
+                                  polynomial_moments, temperatures, low_wavenumber,
+                                  high_wavenumber, utau,
+                                  mu0[integration, position],
+                                  phi0[integration, position],
+                                  mu[integration, position], 
+                                  phi[integration, position], fbeam, fisot,
+                                  albedo, btemp, ttemp, temis, radius, h_lyr, rhoq, rhou,
+                                  rho_accurate, bemst, emust, accur, header, rfldir,
+                                  rfldn, flup, dfdt, uavg, uu, albmed, trnmed)
+
+                print(uu[0, 0, 0])   # shape: (1, 81, 1)
+                raise SystemExit(9)
 
 
 
