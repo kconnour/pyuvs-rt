@@ -59,17 +59,6 @@ h_lyr = model_eos.scale_height_boundaries
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 wavs = dust_file.array['wavelengths'].data
 sizes = dust_file.array['particle_sizes'].data
-c_ext = ForwardScatteringProperty(dust_file.array['primary'].data[:, :, 0],
-                                  particle_size_grid=sizes,
-                                  wavelength_grid=wavs)
-c_sca = ForwardScatteringProperty(dust_file.array['primary'].data[:, :, 1],
-                                  particle_size_grid=sizes,
-                                  wavelength_grid=wavs)
-
-# TODO: this needs overwritten in the loop
-dust_properties = ForwardScatteringPropertyCollection()
-dust_properties.add_property(c_ext, 'c_extinction')
-dust_properties.add_property(c_sca, 'c_scattering')
 
 # Make a phase function. I'm allowing negative coefficients here
 dust_phsfn = TabularLegendreCoefficients(
@@ -170,78 +159,100 @@ for file in files:
             # TODO: what is this really?
             p_sizes = np.linspace(1.5, 1.5, num=len(conrath_profile.profile))
 
-            # Make the new Column where wave_ref = 9.3 microns and column OD = 1
-            # TODO: use real Curiosity OD
-            dust_col = Column(dust_properties, model_eos, conrath_profile.profile, p_sizes,
-                              short_wav[integration, position, :], 9.3, 1, dust_phsfn)
-
             # Make Rayleigh stuff
             rco2 = RayleighCo2(short_wav[integration, position, :], model_eos,
                                n_moments)
 
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            # Make the model
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            model = ModelAtmosphere()
-            # Make tuples of (dtauc, ssalb, pmom) for each constituent
-            dust_info = (dust_col.total_optical_depth, dust_col.scattering_optical_depth,
-                         dust_col.scattering_optical_depth * dust_col.phase_function)
-            rayleigh_info = (rco2.scattering_optical_depths, rco2.scattering_optical_depths,
-                             rco2.phase_function)  # This works since scat OD = total OD
-
-            # Add dust and Rayleigh scattering to the model
-            model.add_constituent(dust_info)
-            model.add_constituent(rayleigh_info)
-
-            # Once everything is in the model, compute the model. Then, slice off the
-            # wavelength dimension since DISORT can only handle 1 wavelength at a time
-            model.compute_model()
             for wavelength in range(n_wavelengths):
-                optical_depths = model.hyperspectral_total_optical_depths[:, wavelength]
-                ssa = model.hyperspectral_total_single_scattering_albedos[:, wavelength]
-                polynomial_moments = model.hyperspectral_legendre_moments[:, :, wavelength]
+                def fit_ssa(guess, wav):
+                    # Trap the guess
+                    if not 0 <= guess <= 1:
+                        return 9999999
+                    cext = dust_file.array['primary'].data[:, :, 0]
+                    cext[:, :] = 1
+                    csca = dust_file.array['primary'].data[:, :, 1]
+                    csca[:, :] = guess  # TODO: or whatever
+                    c_ext = ForwardScatteringProperty(
+                        cext,
+                        particle_size_grid=sizes,
+                        wavelength_grid=wavs)
+                    c_sca = ForwardScatteringProperty(
+                        csca,
+                        particle_size_grid=sizes,
+                        wavelength_grid=wavs)
 
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                # Make the output arrays
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                oa = OutputArrays(cp)
-                albmed = oa.albedo_medium
-                flup = oa.diffuse_up_flux
-                rfldn = oa.diffuse_down_flux
-                rfldir = oa.direct_beam_flux
-                dfdt = oa.flux_divergence
-                uu = oa.intensity
-                uavg = oa.mean_intensity
-                trnmed = oa.transmissivity_medium
+                    dust_properties = ForwardScatteringPropertyCollection()
+                    dust_properties.add_property(c_ext, 'c_extinction')
+                    dust_properties.add_property(c_sca, 'c_scattering')
 
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                # Optical depth output structure
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                utau = UserLevel(cp, mb).optical_depth_output
+                    # Make the new Column where wave_ref = 9.3 microns and column OD = 1
+                    # TODO: use real Curiosity OD
+                    dust_col = Column(dust_properties, model_eos,
+                                      conrath_profile.profile, p_sizes,
+                                      short_wav[integration, position, :], 9.3, 1,
+                                      dust_phsfn)
 
+                    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                    # Make the model
+                    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                    model = ModelAtmosphere()
+                    # Make tuples of (dtauc, ssalb, pmom) for each constituent
+                    dust_info = (
+                    dust_col.total_optical_depth, dust_col.scattering_optical_depth,
+                    dust_col.scattering_optical_depth * dust_col.phase_function)
+                    rayleigh_info = (
+                    rco2.scattering_optical_depths, rco2.scattering_optical_depths,
+                    rco2.phase_function)  # This works since scat OD = total OD
 
-                print(disort.disort.__doc__)
+                    # Add dust and Rayleigh scattering to the model
+                    model.add_constituent(dust_info)
+                    model.add_constituent(rayleigh_info)
 
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                # Run the model
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                rfldir, rfldn, flup, dfdt, uavg, uu, albmed, trnmed = \
-                    disort.disort(usrang, usrtau, ibcnd, onlyfl, prnt, plank, lamber,
-                                  deltamplus, dopseudosphere, optical_depths, ssa,
-                                  polynomial_moments, temperatures, low_wavenumber,
-                                  high_wavenumber, utau,
-                                  mu0[integration, position],
-                                  phi0[integration, position],
-                                  mu[integration, position], 
-                                  phi[integration, position], fbeam, fisot,
-                                  albedo, btemp, ttemp, temis, radius, h_lyr, rhoq, rhou,
-                                  rho_accurate, bemst, emust, accur, header, rfldir,
-                                  rfldn, flup, dfdt, uavg, uu, albmed, trnmed)
+                    model.compute_model()
 
-                print(uu[0, 0, 0])   # shape: (1, 81, 1)
+                    optical_depths = model.hyperspectral_total_optical_depths[:, wav]
+                    ssa = model.hyperspectral_total_single_scattering_albedos[:, wav]
+                    polynomial_moments = model.hyperspectral_legendre_moments[:, :, wav]
+
+                    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                    # Make the output arrays
+                    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                    oa = OutputArrays(cp)
+                    albmed = oa.albedo_medium
+                    flup = oa.diffuse_up_flux
+                    rfldn = oa.diffuse_down_flux
+                    rfldir = oa.direct_beam_flux
+                    dfdt = oa.flux_divergence
+                    uu = oa.intensity
+                    uavg = oa.mean_intensity
+                    trnmed = oa.transmissivity_medium
+
+                    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                    # Optical depth output structure
+                    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                    utau = UserLevel(cp, mb).optical_depth_output
+
+                    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                    # Run the model
+                    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                    rfldir, rfldn, flup, dfdt, uavg, uu, albmed, trnmed = \
+                        disort.disort(usrang, usrtau, ibcnd, onlyfl, prnt, plank, lamber,
+                                      deltamplus, dopseudosphere, optical_depths, ssa,
+                                      polynomial_moments, temperatures, low_wavenumber,
+                                      high_wavenumber, utau,
+                                      mu0[integration, position],
+                                      phi0[integration, position],
+                                      mu[integration, position],
+                                      phi[integration, position], fbeam, fisot,
+                                      albedo, btemp, ttemp, temis, radius, h_lyr, rhoq, rhou,
+                                      rho_accurate, bemst, emust, accur, header, rfldir,
+                                      rfldn, flup, dfdt, uavg, uu, albmed, trnmed)
+
+                    #print(uu[0, 0, 0])   # shape: (1, 81, 1)
+                    #raise SystemExit(9)
+                    return (uu[0, 0, 0] - reflectance[integration, position, wav])**2
+                print(fit_ssa(0.61, 0))
                 raise SystemExit(9)
-
-
 
 
 '''# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
