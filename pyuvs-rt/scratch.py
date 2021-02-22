@@ -15,5 +15,7 @@ for i in files.abs_paths:
 
 
 import numpy as np
-
-
+a = np.load('/home/kyle/retrieved_ssa.npy')
+print(a.shape)
+#print(a[[50, 51, 52, 53, 54, 55, 56], 50, :])
+print(a[50, [50, 51, 52, 53, 54, 55, 56], :])
