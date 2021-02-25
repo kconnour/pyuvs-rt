@@ -163,7 +163,7 @@ def retrieve_ssa(ssa_guess, integration, position):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # TODO: use real profile
     conrath_profile = Conrath(model_eos, 10, 0.5)
-    # TODO: what is this really?
+    # TODO: what is this really?``
     p_sizes = np.linspace(1.5, 1.5, num=len(conrath_profile.profile))
 
     # Make Rayleigh stuff
