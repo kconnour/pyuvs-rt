@@ -2,17 +2,12 @@ Things to do first:
 - Interpolate Gale Crater ODs as a function of Ls
 - Get pixels over Gale Crater where OD > 5, SZA<70, emission<70. All these
   should be np.arrays
-    - Orbit (N)
-    - Filename (N)
-    - Integration (N)
-    - Position (N)
     - Ls (N)
     - Lat (N)
     - Lon (N)
     - SZA (N)
     - Emission (N)
     - Phase (N)
-    - LT (N)
     - I/F (N, 19)
     - Uncertainty (N, 19)
     
