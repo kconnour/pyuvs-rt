@@ -14,6 +14,19 @@ for i in files.abs_paths:
     print(g.location_in_file(l1bc, g.locations['gale_crater']))'''
 
 
+#import numpy as np
+#a = np.load('/home/kyle/retrieved_ssa.npy')
+#print(a.shape)
+#print(a[[50, 51, 52, 53, 54, 55, 56], 50, :])
+#print(a[50, [50, 51, 52, 53, 54, 55, 56], :])
+
+from astropy.io import fits
 import numpy as np
-
-
+from ssa_retrieval.gale_crater import OpticalDepth
+od = OpticalDepth()
+hdul = fits.open('/home/kyle/repos/pyuvs-rt/ssa_files/gale_pixels.fits')
+sza = hdul['sza'].data
+ea = hdul['ea'].data
+ls = np.ravel(hdul['ls'].data)
+pix = sza[np.where((sza <= 72) & (ea <= 72) & (od.interpolate_tau(ls) >= 5))]
+print(pix.shape)
