@@ -20,7 +20,7 @@ for i in files.abs_paths:
 #print(a[[50, 51, 52, 53, 54, 55, 56], 50, :])
 #print(a[50, [50, 51, 52, 53, 54, 55, 56], :])
 
-from astropy.io import fits
+'''from astropy.io import fits
 import numpy as np
 from ssa_retrieval.gale_crater import OpticalDepth
 od = OpticalDepth()
@@ -29,4 +29,17 @@ sza = hdul['sza'].data
 ea = hdul['ea'].data
 ls = np.ravel(hdul['ls'].data)
 pix = sza[np.where((sza <= 72) & (ea <= 72) & (od.interpolate_tau(ls) >= 5))]
-print(pix.shape)
+print(pix.shape)'''
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+a = np.load('/home/kyle/new_retrieved_ssa.npy')
+wavs = np.load('/home/kyle/iuvs_wavelengths.npy')
+ref = np.nanmin(a[:, :], axis=0)
+
+plt.plot(wavs, ref)
+plt.ylim(0.6, 0.75)
+plt.xlabel('Wavelength (nm)')
+plt.ylabel('Retrieved SSA')
+plt.savefig('/home/kyle/ssa.png', dpi=300)
