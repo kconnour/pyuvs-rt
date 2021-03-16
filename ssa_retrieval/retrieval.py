@@ -34,7 +34,14 @@ from ssa_retrieval.gale_crater import OpticalDepth
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Read in the atmosphere file
 aero_path = '/home/kyle/repos/pyuvs-rt/data'
-eos_file = ExternalFile(os.path.join(aero_path, 'marsatm.npy'))
+#eos_file = ExternalFile(os.path.join(aero_path, 'marsatm.npy'))
+eos_file = np.load(os.path.join(aero_path, 'marsatm.npy'))
+# Use T profile from Kass et al 2019
+eos_file[:, 2] = np.array([230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
+                           230, 230, 230, 230, 230, 228, 226, 224, 222, 220,
+                           214, 208, 202, 196, 190, 186, 182, 178, 174, 170,
+                           166, 164, 158, 154, 150, 150, 150, 150, 150, 150,
+                           150])
 
 # Read in the dust scattering properties file
 dust_file = ExternalFile(os.path.join(aero_path, 'dust_properties.fits'))
@@ -47,7 +54,7 @@ dust_phsfn_file = ExternalFile(os.path.join(aero_path,
 # Make the equation of state variables on a custom grid
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 z_boundaries = np.linspace(80, 0, num=20)    # Define the boundaries to use
-model_eos = eos_from_array(eos_file.array, z_boundaries, 3.71, 7.3*10**-26)
+model_eos = eos_from_array(eos_file, z_boundaries, 3.71, 7.3*10**-26)
 temperatures = model_eos.temperature_boundaries
 h_lyr = model_eos.scale_height_boundaries
 
@@ -57,11 +64,15 @@ h_lyr = model_eos.scale_height_boundaries
 wavs = dust_file.array['wavelengths'].data
 sizes = dust_file.array['particle_sizes'].data
 
+# Hack my code like a scientist
+dustwavs = dust_phsfn_file.array['wavelengths'].data
+dustwavs[1] = 0.439
+
 # Make a phase function. I'm allowing negative coefficients here
 dust_phsfn = TabularLegendreCoefficients(
     dust_phsfn_file.array['primary'].data,
     dust_phsfn_file.array['particle_sizes'].data,
-    dust_phsfn_file.array['wavelengths'].data)
+    dustwavs)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Make misc variables
@@ -170,9 +181,9 @@ def retrieve_ssa(ssa_guess, pixel_index):
     # Construct the mutable aerosol properties
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # TODO: use real profile
-    conrath_profile = Conrath(model_eos, 10, 0.5)
+    conrath_profile = Conrath(model_eos, 10, 0.01)
     # TODO: what is this really?
-    p_sizes = np.linspace(3, 3, num=len(conrath_profile.profile))
+    p_sizes = np.linspace(1.5, 1.5, num=len(conrath_profile.profile))
 
     # Make Rayleigh stuff
     rco2 = RayleighCo2(short_wav[pixel_index, :], model_eos,
@@ -289,6 +300,6 @@ for pixel in range(reflectance.shape[0]):
 # https://www.machinelearningplus.com/python/parallel-processing-python/
 pool.close()
 pool.join()  # I guess this postpones further code execution until the queue is finished
-np.save('/home/kyle/retrieved_ssa_2_microns_conrath_10_5.npy', retrieved_ssas)
+np.save('/home/kyle/ssa_retrievals/retrieved_ssa_1-5_microns_conrath_10_01-phasefunctionhack-realTemp.npy', retrieved_ssas)
 t1 = time.time()
 print(t1-t0)
