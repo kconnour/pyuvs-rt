@@ -36,14 +36,24 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 
 wavs = np.load('/home/kyle/iuvs_wavelengths.npy')
+f = np.load('/home/kyle/ssa_retrievals/retrieved_ssa_1-5_const_prop.npy')
+
 
 # Get the Gale crater pixels
-file = '/home/kyle/repos/pyuvs-rt/ssa_files/gale_pixels.fits'
+file = '/home/kyle/repos/pyuvs-rt/ssa_files/gale_pixels_slit.fits'
 hdul = fits.open(file)
-
-'''reflectance = hdul['reflectance'].data
 sza = hdul['sza'].data
 ea = hdul['ea'].data
+
+rfl = np.where((sza <= 50) & (ea <= 72))
+
+a = np.nanmean(f[rfl], axis=0)
+print(a)
+raise SystemExit(9)
+
+'''reflectance = hdul['reflectance'].data
+
+
 
 rfl = np.where((sza <= 40) & (30 <= sza) & (ea <= 72))
 print(reflectance[rfl][:, 0])

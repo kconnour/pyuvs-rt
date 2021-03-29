@@ -23,7 +23,7 @@ from pyRT_DISORT.untested.aerosol import ForwardScatteringProperty, \
     ForwardScatteringPropertyCollection
 from pyRT_DISORT.untested_utils.utilities.external_files import ExternalFile
 from pyRT_DISORT.untested.aerosol_column import Column
-from pyRT_DISORT.untested.vertical_profiles import Conrath, Uniform
+from pyRT_DISORT.untested.vertical_profiles import Conrath
 from pyRT_DISORT.untested.phase_function import TabularLegendreCoefficients
 from pyRT_DISORT.untested.rayleigh import RayleighCo2
 from pyRT_DISORT.untested.model_atmosphere import ModelAtmosphere
@@ -36,12 +36,6 @@ from ssa_retrieval.gale_crater import OpticalDepth
 aero_path = '/home/kyle/repos/pyuvs-rt/data'
 #eos_file = ExternalFile(os.path.join(aero_path, 'marsatm.npy'))
 eos_file = np.load(os.path.join(aero_path, 'marsatm.npy'))
-# Use T profile from Kass et al 2019
-eos_file[:, 2] = np.array([230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
-                           230, 230, 230, 230, 230, 228, 226, 224, 222, 220,
-                           214, 208, 202, 196, 190, 186, 182, 178, 174, 170,
-                           166, 164, 158, 154, 150, 150, 150, 150, 150, 150,
-                           150])
 
 # Read in the dust scattering properties file
 dust_file = ExternalFile(os.path.join(aero_path, 'dust_properties.fits'))
@@ -63,6 +57,9 @@ h_lyr = model_eos.scale_height_boundaries
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 wavs = dust_file.array['wavelengths'].data
 sizes = dust_file.array['particle_sizes'].data
+
+# Hack my code like a scientist
+wavs[1] = 0.439
 
 # Hack my code like a scientist
 dustwavs = dust_phsfn_file.array['wavelengths'].data
@@ -156,8 +153,10 @@ cp = ComputationalParameters(
 # Surface treatment
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #lamb = Lambertian(0.02, cp)
-hapke_w = np.interp(wavelengths.short_wavelengths[0, :], [258, 320], [0.07, 0.095])
-hapke = [HapkeHG2Roughness(0.01, cp, mb, incident_flux, angles, 0.8, 0.06, w, 0.3, 0.45, 20) for w in hapke_w]
+#hapke_w = np.interp(wavelengths.short_wavelengths[0, :], [258, 320], [0.07, 0.095])
+hapke_w = np.interp(wavelengths.short_wavelengths[0, :], np.linspace(0.2, 0.33, num=100), np.linspace(0.01, 0.015, num=100))
+hapke = [Lambertian(w, cp) for w in hapke_w]
+#hapke = [HapkeHG2Roughness(0.01, cp, mb, incident_flux, angles, 0.8, 0.06, w, 0.3, 0.45, 20) for w in hapke_w]
 #lamb = HapkeHG2Roughness(0.01, cp, mb, incident_flux, angles, 0.8, 0.06, 0.08, 0.3, 0.45, 20)
 #albedo = lamb.albedo
 #lamber = lamb.lambertian
@@ -176,6 +175,22 @@ def retrieve_ssa(ssa_guess, pixel_index):
         answer[:] = np.nan
         print(f'skipping pixel {pixel_index}')
         return pixel_index, answer
+
+    # Construct the EoS profiles
+    # Use T profile from Kass et al 2019
+    eos_file[:, 2] = np.array(
+        [230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
+         230, 230, 230, 230, 230, 228, 226, 224, 222, 220,
+         214, 208, 202, 196, 190, 186, 182, 178, 174, 170,
+         166, 164, 158, 154, 150, 150, 150, 150, 150, 150,
+         150])
+
+    # Force P_surface to be 6.1 mbar
+    eos_file[:, 1] *= eos_file[0, 1] / 610
+
+    model_eos = eos_from_array(eos_file, z_boundaries, 3.71, 7.3 * 10 ** -26)
+    temperatures = model_eos.temperature_boundaries
+    h_lyr = model_eos.scale_height_boundaries
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Construct the mutable aerosol properties
@@ -300,6 +315,6 @@ for pixel in range(reflectance.shape[0]):
 # https://www.machinelearningplus.com/python/parallel-processing-python/
 pool.close()
 pool.join()  # I guess this postpones further code execution until the queue is finished
-np.save('/home/kyle/ssa_retrievals/retrieved_ssa_1-5_microns_conrath_10_01-phasefunctionhack-realTemp.npy', retrieved_ssas)
+np.save('/home/kyle/ssa_retrievals/retrieved_ssa_1-5_const_prop.npy', retrieved_ssas)
 t1 = time.time()
 print(t1-t0)
