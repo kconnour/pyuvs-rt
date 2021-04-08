@@ -57,7 +57,7 @@ class GaleCraterCoordinates:
         return self.__radius
 
 
-class OpticalDepth:
+class GaleOpticalDepth:
     """Get the optical depths during the MY34 global dust storm.
 
     OpticalDepth reads in the optical depths as measured by Curiosity and
