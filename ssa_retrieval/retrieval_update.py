@@ -33,6 +33,11 @@ file = '/home/kyle/repos/pyuvs-rt/ssa_files/gale_pixels.fits'
 hdul = fits.open(file)
 
 reflectance = hdul['reflectance'].data
+uncertainty = hdul['uncertainty'].data
+
+# Retrieve higher uncertainty
+#reflectance = reflectance + uncertainty
+
 wavelengths = (hdul['wavelengths'].data / 1000)[0, :]   # convert to microns
 solar_zenith_angle = hdul['sza'].data
 emission_angle = hdul['ea'].data
@@ -58,11 +63,11 @@ pixel_od = GaleOpticalDepth().interpolate_tau(ls)
 # Make the equation of state variables on a custom grid
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 aux_files_path = '/home/kyle/repos/pyuvs-rt/data'
-z_boundaries = np.linspace(80, 0, num=20)    # Define the boundaries to use
+z_boundaries = np.linspace(80, 0, num=15)    # Define the boundaries to use
 eos_file = np.flipud(np.load(os.path.join(aux_files_path, 'marsatm.npy')))
 
 # Force P_surface to be 6.1 mbar
-eos_file[:, 1] *= eos_file[-1, 1] / 610
+eos_file[:, 1] *= 610 / eos_file[-1, 1]
 # Construct the EoS profiles
 # Use T profile from Kass et al 2019
 eos_file[:, 2] = np.flip(np.array(
@@ -103,7 +108,7 @@ fsp_wavs = hdul['wavelengths'].data
 fsp_psizes = hdul['particle_sizes'].data
 
 # TODO: run my code with several of these
-pgrad = np.linspace(1.5, 1.5, num=len(z_boundaries) - 1)
+pgrad = np.linspace(2, 2, num=len(z_boundaries) - 1)
 wave_ref = 0.88
 
 # Read in the dust phase function
@@ -128,12 +133,14 @@ ulv = UserLevel(cp.n_user_levels)
 # Surface treatment
 # Use Todd Clancy's surface
 clancy_lamber = np.interp(wavelengths, np.linspace(0.2, 0.33, num=100),
-                          np.linspace(0.01, 0.015, num=100))
+                          np.linspace(0.01, 0.015, num=100) + 0.95)
 lamb = [Surface(w, cp.n_streams, cp.n_polar, cp.n_azimuth, ob.user_angles,
                 ob.only_fluxes) for w in clancy_lamber]
-# Mike's Hapke surface
-#hapke = [HapkeHG2Roughness(0.01, cp, mb, incident_flux, angles, 0.8, 0.06, w, 0.3, 0.45, 20) for w in hapke_w]
-#lamb = HapkeHG2Roughness(0.01, cp, mb, incident_flux, angles, 0.8, 0.06, 0.08, 0.3, 0.45, 20)
+
+# Make a Lambert surface. If I want a Hapke surface, that needs to be done in
+# retrieve_ssa
+#for l in lamb:
+#    l.make_lambertian()
 
 
 def retrieve_ssa(ssa_guess, pixel_index):
@@ -145,6 +152,16 @@ def retrieve_ssa(ssa_guess, pixel_index):
         print(f'skipping pixel {pixel_index}')
         return pixel_index, answer
 
+    # Make a Hapke surface
+    for index, l in enumerate(lamb):
+        wolff_hapke = np.interp(wavelengths, np.linspace(0.258, 0.32, num=100),
+                                np.linspace(0.07, 0.095, num=100))
+        l.make_hapkeHG2_roughness(0.8, 0.06, wolff_hapke[index], 0.3, 0.45, 20,
+                                  angles.mu[pixel_index],
+                                  angles.mu0[pixel_index],
+                                  angles.phi[pixel_index],
+                                  angles.phi0[pixel_index], flux.beam_flux)
+
     def fit_ssa(guess, wav_index: int):
         # Trap the guess
         if not 0 <= guess <= 1:
@@ -152,13 +169,13 @@ def retrieve_ssa(ssa_guess, pixel_index):
 
         test_cext = np.copy(cext)
         test_csca = np.copy(csca)
-        test_csca[:, 0:2] = guess * test_cext[:, 0:2]
+        test_csca[:, :2] = guess * test_cext[:, :2]
 
         fs = ForwardScattering(test_csca, test_cext, fsp_psizes, fsp_wavs,
                                pgrad, wavelengths, wave_ref)
         fs.make_nn_properties()
 
-        od = OpticalDepth(dust_profile, hydro.column_density, fs.extinction[wav_index],
+        od = OpticalDepth(dust_profile, hydro.column_density, fs.extinction,
                           pixel_od[pixel_index])
 
         tlc = TabularLegendreCoefficients(phsfn, pf_psizes, pf_wavs, pgrad,
@@ -198,7 +215,7 @@ def retrieve_ssa(ssa_guess, pixel_index):
 
     for wavelength in range(19):
         fitted_ssa = optimize.minimize(fit_ssa, np.array([ssa_guess]),
-                                       (wavelength,), method='Nelder-Mead').x
+                                       wavelength, method='Nelder-Mead').x
         answer[wavelength] = fitted_ssa
     return pixel_index, answer
 
@@ -227,6 +244,6 @@ for pixel in range(reflectance.shape[0]):
 # https://www.machinelearningplus.com/python/parallel-processing-python/
 pool.close()
 pool.join()  # I guess this postpones further code execution until the queue is finished
-np.save('/home/kyle/ssa_retrievals/retrieved_ssa_1-5_const_prop-NEW.npy', retrieved_ssas)
+np.save('/home/kyle/ssa_retrievals/const-fsp_const-pf_hapke-wolff_2-0size.npy', retrieved_ssas)
 t1 = time.time()
 print(t1-t0)
