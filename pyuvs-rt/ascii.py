@@ -15,6 +15,7 @@ class L1CAscii:
         self.file = file
         self.n_integrations, self.n_positions, self.n_wavelengths = \
             self._extract_observation_shape_from_file()
+        self.pixel_info, self.spectral_info = self._extract_info()
 
     def _extract_observation_shape_from_file(self) -> tuple[int, int, int]:
         file_shape_line_num = 3
@@ -27,6 +28,31 @@ class L1CAscii:
     def _extract_info_from_line(self, line_number: int, dtype: object) -> np.ndarray:
         line = linecache.getline(self.file, line_number)
         return np.fromstring(line, dtype=dtype, sep=' ')
+
+    @staticmethod
+    def _make_empty_object_array(shape: tuple) -> np.ndarray:
+        return np.zeros(shape, dtype=object)
+
+    def _extract_info(self):
+        pixel_shape = (self.n_integrations, self.n_positions)
+        spectral_shape = pixel_shape + (self.n_wavelengths,)
+        pixel_info = self._make_empty_object_array(pixel_shape)
+        spectral_info = self._make_empty_object_array(spectral_shape)
+
+        for counter, line in enumerate(self._open_file()):
+            if counter < 6:
+                continue
+            line = self._extract_info_from_line(counter, float)
+            if (counter - 6) % (self.n_wavelengths + 1) == 0:
+                pix_info = _PixelInfo(line)
+                pixel_info[pix_info.integration, pix_info.position] = \
+                    pix_info
+            else:
+                spec_info = _SpectralInfo(line)
+                wav_index = (counter - 6) % (self.n_wavelengths + 1) - 1
+                spectral_info[pix_info.integration, pix_info.position, wav_index] = spec_info
+
+        return pixel_info, spectral_info
 
     def make_pixel_latitude(self):
         array_shape = (self.n_integrations, self.n_positions, 5)
@@ -42,112 +68,10 @@ class L1CAscii:
                     = pixel_info.latitude
         return pixel_latitude
 
-    @staticmethod
-    def _make_empty_array(shape: tuple) -> np.ndarray:
-        return np.zeros(shape)
-
-
-
-
-
-
-
-
-    def make_pixel_longitude(self):
-        pixel_longitudes = np.zeros((self.n_integrations, self.n_positions, 5))
-        for counter, line in enumerate(self._open_file()):
-            if counter < 5:
-                continue
-            if (counter - 5) % (self.n_wavelengths + 1) == 0:
-                integration_ind, position_ind = \
-                    self.__get_pixel_indices_from_info_line(line)
-                longitudes = self.__get_longitudes_from_info_line(line)
-                pixel_longitudes[integration_ind, position_ind, :] = longitudes
-        return pixel_longitudes
-
-    def make_tangent_altitude(self):
-        pixel_tan_altitude = np.zeros((self.n_integrations, self.n_positions))
-        for counter, line in enumerate(self.__open_file()):
-            if counter < 5:
-                continue
-            if (counter - 5) % (self.n_wavelengths + 1) == 0:
-                integration_ind, position_ind = \
-                    self.__get_pixel_indices_from_info_line(line)
-                tan_alt = self.__get_tangent_altitude_from_info_line(line)
-                pixel_tan_altitude[integration_ind, position_ind] = tan_alt
-        return pixel_tan_altitude
-
-    def make_local_time(self):
-        pixel_local_time = np.zeros((self.n_integrations, self.n_positions))
-        for counter, line in enumerate(self.__open_file()):
-            if counter < 5:
-                continue
-            if (counter - 5) % (self.n_wavelengths + 1) == 0:
-                integration_ind, position_ind = \
-                    self.__get_pixel_indices_from_info_line(line)
-                local_time = self.__get_local_time_from_info_line(line)
-                pixel_local_time[integration_ind, position_ind] = local_time
-        return pixel_local_time
-
-    def make_solar_zenith_angle(self):
-        sza = np.zeros((self.n_integrations, self.n_positions))
-        for counter, line in enumerate(self.__open_file()):
-            if counter < 5:
-                continue
-            if (counter - 5) % (self.n_wavelengths + 1) == 0:
-                integration_ind, position_ind = \
-                    self.__get_pixel_indices_from_info_line(line)
-                szas = self.__get_solar_zenith_angle_from_info_line(line)
-                sza[integration_ind, position_ind] = szas
-        return sza
-
-    def make_emission_angle(self):
-        emission_angle = np.zeros((self.n_integrations, self.n_positions))
-        for counter, line in enumerate(self.__open_file()):
-            if counter < 5:
-                continue
-            if (counter - 5) % (self.n_wavelengths + 1) == 0:
-                integration_ind, position_ind = \
-                    self.__get_pixel_indices_from_info_line(line)
-                eas = self.__get_emission_angle_from_info_line(line)
-                emission_angle[integration_ind, position_ind] = eas
-        return emission_angle
-
-    def make_phase_angle(self):
-        phase_angle = np.zeros((self.n_integrations, self.n_positions))
-        for counter, line in enumerate(self.__open_file()):
-            if counter < 5:
-                continue
-            if (counter - 5) % (self.n_wavelengths + 1) == 0:
-                integration_ind, position_ind = \
-                    self.__get_pixel_indices_from_info_line(line)
-                pas = self.__get_phase_angle_from_info_line(line)
-                phase_angle[integration_ind, position_ind] = pas
-        return phase_angle
-
-    def make_reflectance(self):
-        reflectance = np.zeros((self.n_integrations, self.n_positions,
-                                self.n_wavelengths))
-        for counter, line in enumerate(self.__open_file()):
-            if counter < 5:
-                continue
-            if (counter - 5) % (self.n_wavelengths + 1) == 0:
-                integration_ind, position_ind = \
-                    self.__get_pixel_indices_from_info_line(line)
-            else:
-                rfl = self.__get_reflectance_from_line(line)
-                wavelength_index = (counter - 5) % (self.n_wavelengths + 1) - 1
-                reflectance[integration_ind, position_ind, wavelength_index] = rfl
-        return reflectance
-
-    def __get_reflectance_from_line(self, line):
-        splits = self.__extract_numbers_from_line(line)
-        return float(splits[2])
-
 
 class _PixelInfo:
     def __init__(self, pixel_info: np.ndarray):
-        self.integration = int(pixel_info[1] - 1)
+        self.integration = int(pixel_info[0] - 1)
         self.position = int(pixel_info[1] - 1)
         self.latitude = pixel_info[2:7]
         self.longitude = pixel_info[7:12]
@@ -157,6 +81,14 @@ class _PixelInfo:
         self.emission_angle = pixel_info[15]
         self.phase_angle = pixel_info[16]
         self.solar_longitude = pixel_info[17]
+
+
+class _SpectralInfo:
+    def __init__(self, spectral_info: np.ndarray):
+        self.wavelength = spectral_info[0]
+        self.solar_flux = spectral_info[1]
+        self.reflectance = spectral_info[2]
+        self.uncertainty = spectral_info[3]
 
 
 if __name__ == '__main__':
