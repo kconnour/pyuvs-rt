@@ -40,10 +40,14 @@ for reff in range(lut_reff.shape[0]):
             m = minimize(fit_k, 150, args=(retrieval20[i, 0], retrieval20[i, 1])).x[0]
         k_spectra[reff, i] = m
 
-print(k_spectra[0, :])
-print(k_spectra[1, :])
-print(k_spectra[2, :])
-print(k_spectra[3, :])
+foo = np.zeros((19, 5))
+tmp = k_spectra.T / 10000
+foo[:, 1:] = tmp
+w = np.linspace(205, 306, num=19)
+foo[:, 0] = w
+np.savetxt('/home/kyle/ssa_retrievals/iteration1/k.csv', foo, delimiter=',')
+
+raise SystemExit(9)
 
 # 2. Get c_sca, c_ext, and z11 at k
 new_csca = np.zeros((4, 19))
