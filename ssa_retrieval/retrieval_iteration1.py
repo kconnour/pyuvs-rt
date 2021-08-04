@@ -62,9 +62,9 @@ pixel_od = GaleOpticalDepth().interpolate_tau(ls)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Make the equation of state variables on a custom grid
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-aux_files_path = '/home/kyle/repos/pyuvs-rt/data'
+aux_files_path = '/home/kyle/dustssa/kyle_iuvs_2'
 z_boundaries = np.linspace(80, 0, num=15)    # Define the boundaries to use
-eos_file = np.flipud(np.load(os.path.join(aux_files_path, 'marsatm.npy')))
+eos_file = np.flipud(np.load(os.path.join('/home/kyle/repos/pyuvs-rt/data/marsatm.npy')))
 
 # Force P_surface to be 6.1 mbar
 eos_file[:, 1] *= 610 / eos_file[-1, 1]
@@ -100,27 +100,23 @@ conrath = Conrath(z_midpoint, q0, H, nu)
 dust_profile = conrath.profile
 
 # Read in the dust properties
-dust_fsp = os.path.join(aux_files_path, 'dust_properties.fits')
-hdul = fits.open(dust_fsp)
-cext = hdul['primary'].data[:, :, 0]
-csca = hdul['primary'].data[:, :, 1]
-fsp_wavs = hdul['wavelengths'].data
-fsp_psizes = hdul['particle_sizes'].data
+cext = np.load(os.path.join(aux_files_path, 'new_cext.npy'))
+csca = np.load(os.path.join(aux_files_path, 'new_csca.npy'))
+fsp_wavs = wavelengths
+fsp_psizes = np.array([1.4, 1.6, 1.8, 2])
 
-# TODO: run my code with several of these
+# TODO: modify this each run
 pgrad = np.linspace(2, 2, num=len(z_boundaries) - 1)
 wave_ref = 0.88
 
 # Read in the dust phase function
-dust_pf = os.path.join(aux_files_path, 'dust_phase_function.fits')
-hdul = fits.open(dust_pf)
-phsfn = hdul['primary'].data
-pf_wavs = hdul['wavelengths'].data
-pf_psizes = hdul['particle_sizes'].data
+phsfn = np.load(os.path.join(aux_files_path, 'new_phase.npy'))
+pf_wavs = wavelengths
+pf_psizes = fsp_psizes
 
 # Use constant properties over the MUV region
-fsp_wavs[1] = 0.439
-pf_wavs[1] = 0.439
+# fsp_wavs[1] = 0.439
+# pf_wavs[1] = 0.439
 
 # Make the misc things
 cp = ComputationalParameters(hydro.n_layers, 65, 16, 1, 1, 80)
@@ -133,7 +129,7 @@ ulv = UserLevel(cp.n_user_levels)
 # Surface treatment
 # Use Todd Clancy's surface
 clancy_lamber = np.interp(wavelengths, np.linspace(0.2, 0.33, num=100),
-                          np.linspace(0.01, 0.015, num=100) + 0.95)
+                          np.linspace(0.01, 0.015, num=100))
 lamb = [Surface(w, cp.n_streams, cp.n_polar, cp.n_azimuth, ob.user_angles,
                 ob.only_fluxes) for w in clancy_lamber]
 
@@ -169,7 +165,8 @@ def retrieve_ssa(ssa_guess, pixel_index):
 
         test_cext = np.copy(cext)
         test_csca = np.copy(csca)
-        test_csca[:, :2] = guess * test_cext[:, :2]
+
+        test_csca[:, wav_index] = guess * test_cext[:, wav_index]
 
         fs = ForwardScattering(test_csca, test_cext, fsp_psizes, fsp_wavs,
                                pgrad, wavelengths, wave_ref)
@@ -244,6 +241,6 @@ for pixel in range(reflectance.shape[0]):
 # https://www.machinelearningplus.com/python/parallel-processing-python/
 pool.close()
 pool.join()  # I guess this postpones further code execution until the queue is finished
-np.save('/home/kyle/ssa_retrievals/iteration1/const-fsp_const-pf_hapke-wolff_2-0size.npy', retrieved_ssas)
+np.save('/home/kyle/ssa_retrievals/iteration1/new-fsp_new-pf_hapke-wolff_2-0size.npy', retrieved_ssas)
 t1 = time.time()
 print(t1-t0)
