@@ -144,6 +144,49 @@ class L1CTxt:
         return reflectance
 
 
+class L2Txt:
+    """A class that can extract all data from an IUVS level 12 txt file.
+
+    It extracts *some* of the various properties from an IUVS l2 text file and
+    stores them as numpy arrays. It acts somewhat analogously to a .fits file.
+
+    Parameters
+    ----------
+    file_path
+        Absolute path to the IUVS .txt file.
+
+    """
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+        self._array = self._make_array()
+
+        self.n_integrations, self.n_positions, self.n_wavelengths = \
+            self._extract_observation_shape_from_file()
+
+        self.surface_pressure = self._reshape_array_column(self._array[:, 13])
+        self.albedo = self._reshape_array_column(self._array[:, -6])
+        self.tau_dust = self._reshape_array_column(self._array[:, -4])
+        self.o3 = self._reshape_array_column(self._array[:, -2])
+
+        del self._array
+
+    def _make_array(self):
+        return np.genfromtxt(self.file_path, skip_header=8)
+
+    def _extract_observation_shape_from_file(self) -> tuple[int, int, int]:
+        file_shape_line_num = 4
+        file_shape = self._extract_info_from_line(file_shape_line_num, int)
+        return file_shape[0], file_shape[1], file_shape[2]
+
+    def _extract_info_from_line(self, line_number: int, dtype: object) \
+            -> np.ndarray:
+        line = linecache.getline(self.file_path, line_number)
+        return np.fromstring(line, dtype=dtype, sep=' ')
+
+    def _reshape_array_column(self, array):
+        return array.reshape((self.n_integrations, self.n_positions), order='F')
+
+
 class _PixelInfo:
     def __init__(self, pixel_info: np.ndarray):
         self.integration = int(pixel_info[0] - 1)
@@ -164,8 +207,3 @@ class _SpectralInfo:
         self.solar_flux = spectral_info[1]
         self.reflectance = spectral_info[2]
         self.uncertainty = spectral_info[3]
-
-
-if __name__ == '__main__':
-    f = '/Users/kyco2464/Documents/l1c/txt/orbit03400/mvn_iuv_l1c_apoapse-orbit03453-muv_20160708T044652_v13_r01.txt'
-    l = L1CTxt(f)
