@@ -24,6 +24,19 @@ class L1CTxt:
             self._extract_observation_shape_from_file()
         self.pixel_info, self.spectral_info = self._extract_pixel_data()
 
+        self.latitude = self._make_latitude()
+        self.longitude = self._make_longitude()
+        self.tangent_altitude = self._make_tangent_altitude()
+        self.local_time = self._make_local_time()
+        self.solar_zenith_angle = self._make_solar_zenith_angle()
+        self.emission_angle = self._make_emission_angle()
+        self.phase_angle = self._make_phase_angle()
+        self.solar_longitude = self._make_solar_longitude()
+        self._reflectance = self._make_reflectance()
+
+        del self.pixel_info
+        del self.spectral_info
+
     def _extract_observation_shape_from_file(self) -> tuple[int, int, int]:
         file_shape_line_num = 4
         file_shape = self._extract_info_from_line(file_shape_line_num, int)
@@ -66,11 +79,70 @@ class L1CTxt:
     def _make_wavelength_index(self, line_number) -> int:
         return (line_number - 6) % (self.n_wavelengths + 1) - 1
 
+    # TODO: Can I fix this code duplication?
     def _make_latitude(self):
-        latitude = np.zeros((self.n_integrations, self.n_positions))
+        latitude = np.zeros((self.n_integrations, self.n_positions, 5))
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
-                latitude[i, j] = self.pixel_info[i, j].latitude
+                latitude[i, j, :] = self.pixel_info[i, j].latitude
+        return latitude
+
+    def _make_longitude(self):
+        longitude = np.zeros((self.n_integrations, self.n_positions, 5))
+        for i in range(self.n_integrations):
+            for j in range(self.n_positions):
+                longitude[i, j, :] = self.pixel_info[i, j].longitude
+        return longitude
+
+    def _make_tangent_altitude(self):
+        tan_alt = np.zeros((self.n_integrations, self.n_positions))
+        for i in range(self.n_integrations):
+            for j in range(self.n_positions):
+                tan_alt[i, j] = self.pixel_info[i, j].tangent_altitude
+        return tan_alt
+
+    def _make_local_time(self):
+        local_time = np.zeros((self.n_integrations, self.n_positions))
+        for i in range(self.n_integrations):
+            for j in range(self.n_positions):
+                local_time[i, j] = self.pixel_info[i, j].local_time
+        return local_time
+
+    def _make_solar_zenith_angle(self):
+        sza = np.zeros((self.n_integrations, self.n_positions))
+        for i in range(self.n_integrations):
+            for j in range(self.n_positions):
+                sza[i, j] = self.pixel_info[i, j].solar_zenith_angle
+        return sza
+
+    def _make_emission_angle(self):
+        emission_angle = np.zeros((self.n_integrations, self.n_positions))
+        for i in range(self.n_integrations):
+            for j in range(self.n_positions):
+                emission_angle[i, j] = self.pixel_info[i, j].emission_angle
+        return emission_angle
+
+    def _make_phase_angle(self):
+        phase_angle = np.zeros((self.n_integrations, self.n_positions))
+        for i in range(self.n_integrations):
+            for j in range(self.n_positions):
+                phase_angle[i, j] = self.pixel_info[i, j].phase_angle
+        return phase_angle
+
+    def _make_solar_longitude(self):
+        solar_longitude = np.zeros((self.n_integrations, self.n_positions))
+        for i in range(self.n_integrations):
+            for j in range(self.n_positions):
+                solar_longitude[i, j, :] = self.pixel_info[i, j].solar_longitude
+        return solar_longitude
+
+    def _make_reflectance(self):
+        reflectance = np.zeros((self.n_integrations, self.n_positions, self.n_wavelengths))
+        for i in range(self.n_integrations):
+            for j in range(self.n_positions):
+                for k in range(self.n_wavelengths):
+                    reflectance[i, j, k] = self.spectral_info[i, j, k].reflectance
+        return reflectance
 
 
 class _PixelInfo:
