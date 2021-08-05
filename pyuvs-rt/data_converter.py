@@ -1,7 +1,6 @@
 """This module has tools to create more usable files from ascii files."""
 import linecache
 import numpy as np
-from astropy.io import fits
 
 
 class L1CTxt:
@@ -22,7 +21,7 @@ class L1CTxt:
         self.file_path = file_path
         self.n_integrations, self.n_positions, self.n_wavelengths = \
             self._extract_observation_shape_from_file()
-        self.pixel_info, self.spectral_info = self._extract_pixel_data()
+        self._pixel_info, self._spectral_info = self._extract_pixel_data()
 
         self.latitude = self._make_latitude()
         self.longitude = self._make_longitude()
@@ -32,10 +31,10 @@ class L1CTxt:
         self.emission_angle = self._make_emission_angle()
         self.phase_angle = self._make_phase_angle()
         self.solar_longitude = self._make_solar_longitude()
-        self._reflectance = self._make_reflectance()
+        self.reflectance = self._make_reflectance()
 
-        del self.pixel_info
-        del self.spectral_info
+        del self._pixel_info
+        del self._spectral_info
 
     def _extract_observation_shape_from_file(self) -> tuple[int, int, int]:
         file_shape_line_num = 4
@@ -53,14 +52,13 @@ class L1CTxt:
         pixel_info = np.zeros(pixel_shape, dtype=object)
         spectral_info = np.zeros(spectral_shape, dtype=object)
 
-        for line_number, line in enumerate(open(self.file_path, 'r')):
+        for line_number, line in enumerate(open(self.file_path, 'r'), start=1):
             if self._is_file_header_line(line_number):
                 continue
             line = self._extract_info_from_line(line_number, float)
             if self._is_pixel_info_line(line_number):
                 pix_info = _PixelInfo(line)
-                pixel_info[pix_info.integration, pix_info.position] = \
-                    pix_info
+                pixel_info[pix_info.integration, pix_info.position] = pix_info
             else:
                 spec_info = _SpectralInfo(line)
                 wav_index = self._make_wavelength_index(line_number)
@@ -80,68 +78,69 @@ class L1CTxt:
         return (line_number - 6) % (self.n_wavelengths + 1) - 1
 
     # TODO: Can I fix this code duplication?
-    def _make_latitude(self):
-        latitude = np.zeros((self.n_integrations, self.n_positions, 5))
+    def _make_latitude(self) -> np.ndarray:
+        latitude = np.zeros(self._pixel_info.shape + (5,))
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
-                latitude[i, j, :] = self.pixel_info[i, j].latitude
+                latitude[i, j, :] = self._pixel_info[i, j].latitude
         return latitude
 
     def _make_longitude(self):
-        longitude = np.zeros((self.n_integrations, self.n_positions, 5))
+        longitude = np.zeros(self._pixel_info.shape + (5,))
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
-                longitude[i, j, :] = self.pixel_info[i, j].longitude
+                longitude[i, j, :] = self._pixel_info[i, j].longitude
         return longitude
 
     def _make_tangent_altitude(self):
-        tan_alt = np.zeros((self.n_integrations, self.n_positions))
+        tan_alt = np.zeros(self._pixel_info.shape)
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
-                tan_alt[i, j] = self.pixel_info[i, j].tangent_altitude
+                tan_alt[i, j] = self._pixel_info[i, j].tangent_altitude
         return tan_alt
 
     def _make_local_time(self):
-        local_time = np.zeros((self.n_integrations, self.n_positions))
+        local_time = np.zeros(self._pixel_info.shape)
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
-                local_time[i, j] = self.pixel_info[i, j].local_time
+                local_time[i, j] = self._pixel_info[i, j].local_time
         return local_time
 
     def _make_solar_zenith_angle(self):
-        sza = np.zeros((self.n_integrations, self.n_positions))
+        sza = np.zeros(self._pixel_info.shape)
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
-                sza[i, j] = self.pixel_info[i, j].solar_zenith_angle
+                sza[i, j] = self._pixel_info[i, j].solar_zenith_angle
         return sza
 
     def _make_emission_angle(self):
-        emission_angle = np.zeros((self.n_integrations, self.n_positions))
+        emission_angle = np.zeros(self._pixel_info.shape)
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
-                emission_angle[i, j] = self.pixel_info[i, j].emission_angle
+                emission_angle[i, j] = self._pixel_info[i, j].emission_angle
         return emission_angle
 
     def _make_phase_angle(self):
-        phase_angle = np.zeros((self.n_integrations, self.n_positions))
+        phase_angle = np.zeros(self._pixel_info.shape)
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
-                phase_angle[i, j] = self.pixel_info[i, j].phase_angle
+                phase_angle[i, j] = self._pixel_info[i, j].phase_angle
         return phase_angle
 
     def _make_solar_longitude(self):
-        solar_longitude = np.zeros((self.n_integrations, self.n_positions))
+        solar_longitude = np.zeros(self._pixel_info.shape)
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
-                solar_longitude[i, j, :] = self.pixel_info[i, j].solar_longitude
+                solar_longitude[i, j] = self._pixel_info[i, j].solar_longitude
         return solar_longitude
 
     def _make_reflectance(self):
-        reflectance = np.zeros((self.n_integrations, self.n_positions, self.n_wavelengths))
+        reflectance = np.zeros(self._spectral_info.shape)
         for i in range(self.n_integrations):
             for j in range(self.n_positions):
                 for k in range(self.n_wavelengths):
-                    reflectance[i, j, k] = self.spectral_info[i, j, k].reflectance
+                    reflectance[i, j, k] = \
+                        self._spectral_info[i, j, k].reflectance
         return reflectance
 
 
@@ -168,71 +167,5 @@ class _SpectralInfo:
 
 
 if __name__ == '__main__':
-    pass
-
-
-class CreateFits:
-    """A CreateFits object allows users to make .fits files"""
-    def __init__(self, primary_hdu):
-        """
-        Parameters
-        ----------
-        primary_hdu: np.ndarray
-            The data to go into the primary structure
-        """
-        self.primary_hdu = primary_hdu
-        self.columns = []
-        self.__add_primary_hdu()
-
-    def add_image_hdu(self, data, name):
-        """Add an ImageHDU to this object
-
-        Parameters
-        ----------
-        data: np.ndarray
-            The data to add to this structure
-        name: str
-            The name of this ImageHDU
-
-        Returns
-        -------
-            None
-        """
-        self.__check_input_is_str(name, 'name')
-        self.__check_addition_is_numpy_array(data, name)
-        image = fits.ImageHDU(name=name)
-        image.data = data
-        self.columns.append(image)
-
-    def save_fits(self, save_location, overwrite=True):
-        """Save this object as a .fits file
-
-        Parameters
-        ----------
-        save_location: str
-            The location where to save this .fits file
-        overwrite: bool
-            Denote if this object should overwrite a file with the same name as save_location. Default is True
-
-        Returns
-        -------
-            None
-        """
-        self.__check_input_is_str(save_location, 'save_location')
-        combined_fits = fits.HDUList(self.columns)
-        combined_fits.writeto(save_location, overwrite=overwrite)
-
-    def __add_primary_hdu(self):
-        self.__check_addition_is_numpy_array(self.primary_hdu, 'primary')
-        hdu = fits.PrimaryHDU()
-        hdu.data = self.primary_hdu
-        self.columns.append(hdu)
-
-    @staticmethod
-    def __check_addition_is_numpy_array(array, name):
-        pass
-
-    @staticmethod
-    def __check_input_is_str(test_name, input_name):
-        if not isinstance(test_name, str):
-            raise TypeError(f'{input_name} must be a string.')
+    f = '/Users/kyco2464/Documents/l1c/txt/orbit03400/mvn_iuv_l1c_apoapse-orbit03453-muv_20160708T044652_v13_r01.txt'
+    l = L1CTxt(f)
