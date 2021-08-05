@@ -4,69 +4,73 @@ import numpy as np
 from astropy.io import fits
 
 
-class L1CAscii:
-    """A class that can extract all data from the level 1c txt files.
+class L1CTxt:
+    """A class that can extract all data from an IUVS level 1c txt file.
 
-    It contains methods to extract the various properties from an l1c file and
-    store them as numpy arrays.
+    It extracts the various properties from an IUVS l1c text file and stores
+    them as numpy arrays. It acts somewhat analogously to a .fits file.
 
     """
-    def __init__(self, file: str):
-        self.file = file
+    def __init__(self, file_path: str):
+        """
+        Parameters
+        ----------
+        file_path
+            Absolute path to the IUVS .txt file.
+
+        """
+        self.file_path = file_path
         self.n_integrations, self.n_positions, self.n_wavelengths = \
             self._extract_observation_shape_from_file()
-        self.pixel_info, self.spectral_info = self._extract_info()
+        self.pixel_info, self.spectral_info = self._extract_pixel_data()
 
     def _extract_observation_shape_from_file(self) -> tuple[int, int, int]:
-        file_shape_line_num = 3
+        file_shape_line_num = 4
         file_shape = self._extract_info_from_line(file_shape_line_num, int)
         return file_shape[0], file_shape[1], file_shape[2]
 
-    def _open_file(self):
-        return open(self.file, 'r')
-
-    def _extract_info_from_line(self, line_number: int, dtype: object) -> np.ndarray:
-        line = linecache.getline(self.file, line_number)
+    def _extract_info_from_line(self, line_number: int, dtype: object) \
+            -> np.ndarray:
+        line = linecache.getline(self.file_path, line_number)
         return np.fromstring(line, dtype=dtype, sep=' ')
 
-    @staticmethod
-    def _make_empty_object_array(shape: tuple) -> np.ndarray:
-        return np.zeros(shape, dtype=object)
-
-    def _extract_info(self):
+    def _extract_pixel_data(self) -> tuple[np.ndarray, np.ndarray]:
         pixel_shape = (self.n_integrations, self.n_positions)
         spectral_shape = pixel_shape + (self.n_wavelengths,)
-        pixel_info = self._make_empty_object_array(pixel_shape)
-        spectral_info = self._make_empty_object_array(spectral_shape)
+        pixel_info = np.zeros(pixel_shape, dtype=object)
+        spectral_info = np.zeros(spectral_shape, dtype=object)
 
-        for counter, line in enumerate(self._open_file()):
-            if counter < 6:
+        for line_number, line in enumerate(open(self.file_path, 'r')):
+            if self._is_file_header_line(line_number):
                 continue
-            line = self._extract_info_from_line(counter, float)
-            if (counter - 6) % (self.n_wavelengths + 1) == 0:
+            line = self._extract_info_from_line(line_number, float)
+            if self._is_pixel_info_line(line_number):
                 pix_info = _PixelInfo(line)
                 pixel_info[pix_info.integration, pix_info.position] = \
                     pix_info
             else:
                 spec_info = _SpectralInfo(line)
-                wav_index = (counter - 6) % (self.n_wavelengths + 1) - 1
-                spectral_info[pix_info.integration, pix_info.position, wav_index] = spec_info
+                wav_index = self._make_wavelength_index(line_number)
+                spectral_info[pix_info.integration, pix_info.position,
+                              wav_index] = spec_info
 
         return pixel_info, spectral_info
 
-    def make_pixel_latitude(self):
-        array_shape = (self.n_integrations, self.n_positions, 5)
-        pixel_latitude = self._make_empty_array(array_shape)
+    @staticmethod
+    def _is_file_header_line(line_number: int) -> bool:
+        return line_number < 6
 
-        for counter, line in enumerate(self._open_file()):
-            if counter < 5:
-                continue
-            if (counter - 5) % (self.n_wavelengths + 1) == 0:
-                line = self._extract_info_from_line(counter, float)
-                pixel_info = _PixelInfo(line)
-                pixel_latitude[pixel_info.integration, pixel_info.position, :] \
-                    = pixel_info.latitude
-        return pixel_latitude
+    def _is_pixel_info_line(self, line_number: int) -> bool:
+        return (line_number - 6) % (self.n_wavelengths + 1) == 0
+
+    def _make_wavelength_index(self, line_number) -> int:
+        return (line_number - 6) % (self.n_wavelengths + 1) - 1
+
+    def _make_latitude(self):
+        latitude = np.zeros((self.n_integrations, self.n_positions))
+        for i in range(self.n_integrations):
+            for j in range(self.n_positions):
+                latitude[i, j] = self.pixel_info[i, j].latitude
 
 
 class _PixelInfo:
